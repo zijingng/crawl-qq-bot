@@ -1,8 +1,10 @@
 import asyncio
 
 from graia.application import GraiaMiraiApplication, Session
+from graia.application.event.mirai import NewFriendRequestEvent
 from graia.application.message.chain import MessageChain
 from graia.application.message.elements.internal import Plain, Image
+from graia.application.friend import Friend
 from graia.application.group import Group, Member
 from graia.broadcast import Broadcast
 
@@ -47,7 +49,7 @@ async def group_message_handler(app: GraiaMiraiApplication, message: MessageChai
         await ircClient.message('Cheibriados', message.asDisplay())
 
 @bcc.receiver("TempMessage")
-async def group_message_handler(app: GraiaMiraiApplication, message: MessageChain, group: Group, member: Member):
+async def temp_message_handler(app: GraiaMiraiApplication, message: MessageChain, group: Group, member: Member):
     global qqGroup
     global qqId
     if message.asDisplay()[0] in ['!','.','=','&','?','^']:
@@ -62,6 +64,37 @@ async def group_message_handler(app: GraiaMiraiApplication, message: MessageChai
     if message.asDisplay().startswith('%'):
         qqGroup = group
         qqId = member.id
+        await ircClient.message('Cheibriados', message.asDisplay())
+
+@bcc.receiver("NewFriendRequestEvent")
+async def new_friend_request_handler(event: NewFriendRequestEvent):
+    if event.sourceGroup is not None:
+        if event.sourceGroup == 145375663:
+            await event.accept()
+            return
+    memberList = await qqClient.memberList(145375663)
+    for member in memberList:
+        if event.supplicant == member.id:
+            await event.accept()
+            return
+    await event.reject()
+
+@bcc.receiver("FriendMessage")
+async def friend_message_handler(app: GraiaMiraiApplication, message: MessageChain, sender: Friend):
+    global qqGroup
+    global qqId
+    if message.asDisplay()[0] in ['!','.','=','&','?','^']:
+        forsequell = '!RELAY -n 1 -channel msg -nick %s -prefix friend::%s: %s' % (sender.id, sender.id, message.asDisplay())
+        await ircClient.message('Sequell', forsequell)
+    
+    if message.asDisplay().startswith('@?'):
+        qqGroup = None
+        qqId = friend.id
+        await ircClient.message('Gretell', message.asDisplay())
+    
+    if message.asDisplay().startswith('%'):
+        qqGroup = None
+        qqId = friend.id
         await ircClient.message('Cheibriados', message.asDisplay())
 
 import pydle
@@ -121,15 +154,22 @@ class MyIrcClient(pydle.Client):
                     await qqClient.sendGroupMessage(group, MessageChain.create(response))
                 elif serv == 'temp':
                     await qqClient.sendTempMessage(group, member, MessageChain.create(response))
+                elif serv == 'friend':
+                    await qqClient.sendFriendMessage(member, MessageChain.create(response))
+
             if source=='Gretell':
                 if qqId is None:
                     await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(message)]))
+                elif qqGroup is None:
+                    await qqClient.sendFriendMessage(member, MessageChain.create([Plain(message)]))
                 else:
                     await qqClient.sendTempMessage(qqGroup, qqId, MessageChain.create([Plain(message)]))
 
             if source=='Cheibriados':
                 if qqId is None:
                     await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(message)]))
+                elif qqGroup is None:
+                    await qqClient.sendFriendMessage(member, MessageChain.create([Plain(message)]))
                 else:
                     await qqClient.sendTempMessage(qqGroup, qqId, MessageChain.create([Plain(message)]))
 
