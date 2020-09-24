@@ -2,7 +2,7 @@ import asyncio
 
 from graia.application import GraiaMiraiApplication, Session
 from graia.application.message.chain import MessageChain
-from graia.application.message.elements.internal import Plain
+from graia.application.message.elements.internal import Plain, Image
 from graia.application.group import Group, Member
 from graia.broadcast import Broadcast
 
@@ -42,11 +42,11 @@ async def group_message_handler(app: GraiaMiraiApplication, message: MessageChai
     if message.asDisplay().startswith('%'):
         await ircClient.message('Cheibriados', message.asDisplay())
 
-
-
 import pydle
 import re
 import traceback
+import sys
+#import aiohttp
 
 clrstrip = re.compile("\x03(?:\d{1,2}(?:,\d{1,2})?)?", re.UNICODE)
 
@@ -89,7 +89,19 @@ class MyIrcClient(pydle.Client):
             	    msg = msg
             	if serv=='qq':
                     global qqGroup
-                    await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(msg)]))
+                    response = [Plain(msg)]
+                    img_url_regex = '(http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+\.(?:jpg|png|gif))'
+                    for url in re.findall(img_url_regex, msg):
+                        #url = url.replace('http://i.imgur.com', 'https://i.imgur.com')
+                        #async def download(url):
+                            #async with aiohttp.ClientSession() as session:
+                                #async with session.get(url) as resp:
+                                    #return await resp.content.read()
+                        #img = await download(url)
+                        #response.append(Image.fromUnsafeBytes(img))
+                        response.append(Image.fromNetworkAddress(url=url))
+                        
+                    await qqClient.sendGroupMessage(qqGroup, MessageChain.create(response))
             if source=='Gretell':
                 await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(message)]))
 
