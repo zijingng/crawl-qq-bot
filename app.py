@@ -23,13 +23,36 @@ qqClient = GraiaMiraiApplication(
     enable_chat_log=True
 )
 
+qqLock = asyncio.Lock()
 qqGroup = None
 qqId = None
+
+class QQChan:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.group = None
+        self.member = None
+    def SetId(self, group, member):
+        self.group = group
+        self.member = member
+    def GetType(self):
+        if self.group is None and self.member is None:
+            return None
+        elif self.group is None and self.member is not None:
+            return 'friend'
+        elif self.group is not None and self.member is None:
+            return 'group'
+        else:
+            return 'temp'
+
+GretellChan = QQChan()
+CheibriadosChan = QQChan()
 
 @bcc.receiver("GroupMessage")
 async def group_message_handler(app: GraiaMiraiApplication, message: MessageChain, group: Group, member: Member):
     #print(message.asDisplay())
-    global qqGroup
+    global GretellChan
+    global CheibriadosChan
     if message.asDisplay()[0] in ['!','.','=','&','?','^']:
         #yield from client.send_message(message.channel, '%s wants his !lg' % nick)
         #yield irc_client.message('##kramell', '%s used !lg in discord channel %s' % (nick, message.channel))
@@ -39,32 +62,44 @@ async def group_message_handler(app: GraiaMiraiApplication, message: MessageChai
         await ircClient.message('Sequell', forsequell)
     
     if message.asDisplay().startswith('@?'):
-        qqGroup = group
-        qqId = None
+        await GretellChan.lock.acquire()
+        GretellChan.SetId(group.id, None)
         await ircClient.message('Gretell', message.asDisplay())
+        await asyncio.sleep(10)
+        if GretellChan.lock.locked():
+            GretellChan.lock.release()
     
     if message.asDisplay().startswith('%'):
-        qqGroup = group
-        qqId = None
+        await CheibriadosChan.lock.acquire()
+        CheibriadosChan.SetId(group.id, None)
         await ircClient.message('Cheibriados', message.asDisplay())
+        await asyncio.sleep(10)
+        if CheibriadosChan.lock.locked():
+            CheibriadosChan.lock.release()
 
 @bcc.receiver("TempMessage")
 async def temp_message_handler(app: GraiaMiraiApplication, message: MessageChain, group: Group, member: Member):
-    global qqGroup
-    global qqId
+    global GretellChan
+    global CheibriadosChan
     if message.asDisplay()[0] in ['!','.','=','&','?','^']:
         forsequell = '!RELAY -n 1 -channel msg -nick %s -prefix temp:%s:%s: %s' % (member.id, group.id, member.id, message.asDisplay())
         await ircClient.message('Sequell', forsequell)
     
     if message.asDisplay().startswith('@?'):
-        qqGroup = group
-        qqId = member.id
+        await GretellChan.lock.acquire()
+        GretellChan.SetId(group.id, member.id)
         await ircClient.message('Gretell', message.asDisplay())
+        await asyncio.sleep(10)
+        if GretellChan.lock.locked():
+            GretellChan.lock.release()
     
     if message.asDisplay().startswith('%'):
-        qqGroup = group
-        qqId = member.id
+        await CheibriadosChan.lock.acquire()
+        CheibriadosChan.SetId(group.id, member.id)
         await ircClient.message('Cheibriados', message.asDisplay())
+        await asyncio.sleep(10)
+        if CheibriadosChan.lock.locked():
+            CheibriadosChan.lock.release()
 
 @bcc.receiver("NewFriendRequestEvent")
 async def new_friend_request_handler(event: NewFriendRequestEvent):
@@ -81,21 +116,27 @@ async def new_friend_request_handler(event: NewFriendRequestEvent):
 
 @bcc.receiver("FriendMessage")
 async def friend_message_handler(app: GraiaMiraiApplication, message: MessageChain, sender: Friend):
-    global qqGroup
-    global qqId
+    global GretellChan
+    global CheibriadosChan
     if message.asDisplay()[0] in ['!','.','=','&','?','^']:
         forsequell = '!RELAY -n 1 -channel msg -nick %s -prefix friend::%s: %s' % (sender.id, sender.id, message.asDisplay())
         await ircClient.message('Sequell', forsequell)
     
     if message.asDisplay().startswith('@?'):
-        qqGroup = None
-        qqId = friend.id
+        await GretellChan.lock.acquire()
+        GretellChan.SetId(None, sender.id)
         await ircClient.message('Gretell', message.asDisplay())
+        await asyncio.sleep(10)
+        if GretellChan.lock.locked():
+            GretellChan.lock.release()
     
     if message.asDisplay().startswith('%'):
-        qqGroup = None
-        qqId = friend.id
+        await CheibriadosChan.lock.acquire()
+        CheibriadosChan.SetId(None, sender.id)
         await ircClient.message('Cheibriados', message.asDisplay())
+        await asyncio.sleep(10)
+        if CheibriadosChan.lock.locked():
+            CheibriadosChan.lock.release()
 
 import pydle
 import re
@@ -105,9 +146,9 @@ import sys
 clrstrip = re.compile("\x03(?:\d{1,2}(?:,\d{1,2})?)?", re.UNICODE)
 
 class MyIrcClient(pydle.Client):
+    global GretellChan
+    global CheibriadosChan
     async def on_message(self, target, source, message):
-        global qqGroup
-        global qqId
         try:
             print(message.encode('utf-8'))
             await super().on_message(target, source, message)
@@ -122,28 +163,16 @@ class MyIrcClient(pydle.Client):
                 msg = ':'.join(msgarray[3:])
                 
                 url_regex = '(http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+)'
-                #msg_urls = re.findall(url_regex, msg)
                 msg_split = re.split(url_regex, msg)
                 
-                for mdchar in ['\\','*','_','~','`']:
-                    for i in range(0,len(msg_split),2):
-                        msg_split[i] = msg_split[i].replace(mdchar,'\\'+mdchar)
-                    #msg_wo_ulrs = msg_wo_ulrs.replace(mdchar,'\\'+mdchar)
-                
-                #msg = msg_wo_ulrs.format(*msg_urls)
                 msg = ''.join(msg_split)
                 
                 if msg[:3]=='/me':
                     msg = '*'+msg[3:].strip()+'*'
-                #msg = msg.replace('/me','*'+client.user.name+'*')
                 
                 if re.search('\[\d\d?/\d\d?\]:', msg):
                     s = re.split('(\[\d\d?/\d\d?\]:)', msg)
-                    #msg = s[0] + s[1] + '```\n' + ''.join(s[2:]).strip() + '\n```' # put only the content of the ?? in a block
                     msg = s[0] + s[1] + '\n' + ''.join(s[2:]).strip()
-                else:
-                    #msg = '```\n' + msg + '\n```' # put in a code block to preserve formatting
-                    msg = msg
                 
                 response = [Plain(msg)]
                 img_url_regex = '(http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+\.(?:jpg|png|gif))'
@@ -157,21 +186,23 @@ class MyIrcClient(pydle.Client):
                 elif serv == 'friend':
                     await qqClient.sendFriendMessage(member, MessageChain.create(response))
 
-            if source=='Gretell':
-                if qqId is None:
-                    await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(message)]))
-                elif qqGroup is None:
-                    await qqClient.sendFriendMessage(member, MessageChain.create([Plain(message)]))
-                else:
-                    await qqClient.sendTempMessage(qqGroup, qqId, MessageChain.create([Plain(message)]))
+            chan = None
+            if source == 'Gretell':
+                chan = GretellChan
+            if source == 'Cheibriados':
+                chan = CheibriadosChan
 
-            if source=='Cheibriados':
-                if qqId is None:
-                    await qqClient.sendGroupMessage(qqGroup, MessageChain.create([Plain(message)]))
-                elif qqGroup is None:
-                    await qqClient.sendFriendMessage(member, MessageChain.create([Plain(message)]))
-                else:
-                    await qqClient.sendTempMessage(qqGroup, qqId, MessageChain.create([Plain(message)]))
+            if chan is not None:
+                if chan.lock.locked():
+                    if chan.GetType() == 'group':
+                        await qqClient.sendGroupMessage(chan.group, MessageChain.create([Plain(message)]))
+                    elif chan.GetType() == 'friend':
+                        await qqClient.sendFriendMessage(chan.member, MessageChain.create([Plain(message)]))
+                    elif chan.GetType() == 'temp':
+                        await qqClient.sendTempMessage(chan.group, chan.member, MessageChain.create([Plain(message)]))
+                    if chan.lock.locked():
+                        chan.lock.release()
+
 
         except Exception:
             print("Exception irc thread:")
