@@ -23,10 +23,6 @@ qqClient = GraiaMiraiApplication(
     enable_chat_log=True
 )
 
-qqLock = asyncio.Lock()
-qqGroup = None
-qqId = None
-
 class QQChan:
     def __init__(self):
         self.lock = asyncio.Lock()
